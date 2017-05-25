@@ -7,13 +7,7 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.io.Reader;
 import java.math.BigDecimal;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.List;
-import java.util.ArrayList;
-import java.util.Set;
-import java.util.Vector;
+import java.util.*;
 import java.text.DecimalFormat;
 
 import javax.xml.parsers.DocumentBuilder;
@@ -21,10 +15,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.transform.TransformerConfigurationException;
 
 import org.jgrapht.alg.ConnectivityInspector;
-import org.jgrapht.graph.DefaultEdge;
-import org.jgrapht.graph.DefaultWeightedEdge;
-import org.jgrapht.graph.Pseudograph;
-import org.jgrapht.graph.WeightedPseudograph;
+import org.jgrapht.graph.*;
 import org.w3c.dom.Attr;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
@@ -330,7 +321,9 @@ public class Osm2Wkt {
 	private boolean fixCompleteness(){
 		System.out.println("checking landmark completeness for all streets ...");
 
+    int total_streets = 0;
 		for(Vector<Long> l : streets.values()){
+      total_streets++;
 			for(Long mark : l){
 				if(!landmarks.containsKey(mark)){
 					System.out.println("landmarks " + mark + " for street not found");
@@ -357,11 +350,176 @@ public class Osm2Wkt {
 		boolean changed = false;  
 		long missingLandmarks = 0;
 
+
+    //preprocess: Hacemos un preprocesamiento asumiendo que las calles
+    //anteriores no cambian, luego pasamos al algoritmo completo
+
+
+    int maximo = 0;
+    int current = 0;
+
+    Queue<Long> queue_streets = new LinkedList<>();
+
+    for(Long streetA : streets.keySet()){
+      queue_streets.add(streetA);
+    }
+
+    int i = 0;
+
 		do{
 			changed = false;
 
 			// walk all streets
+			while(!queue_streets.isEmpty()){
+        Long streetA = queue_streets.element();
+        System.out.println("Street " + i + "/" + total_streets + ", restantes " + queue_streets.size());
+				Vector<Long> streetPointsA = streets.get(streetA);
+
+				int indexA = 0;
+				long lastAP = -1;
+				long currentAP = -1;
+				Landmark lastAL = null;
+				Landmark currentAL = null;
+
+				// iterate over every street part of the current street
+				for(Iterator<Long> iterpA = streetPointsA.iterator(); iterpA.hasNext(); indexA++){
+					Long pA = iterpA.next();
+
+					if(lastAP == -1 || lastAL == null){
+						lastAP = pA;
+						lastAL = landmarks.get(pA);
+						continue;
+					}
+
+					// street part goes from lastP to currentP
+					currentAP = pA;
+					currentAL = landmarks.get(pA);
+
+					// check to see if this street part crosses another street part
+					// this indicates a missing landmark at this position
+
+					// walk over possible crossing street
+					for(Long streetB : streets.keySet()){
+						Vector<Long> streetPointsB = streets.get(streetB);
+
+						// don't check street with itself
+						if((long)streetA == (long)streetB) continue;
+
+
+						// unchecked street parts, go...
+						int indexB = 0;
+						long lastBP = -1;
+						long currentBP = -1;
+						Landmark lastBL = null;
+						Landmark currentBL = null;
+
+						// walk over the street part of possible crossing street
+						for(Iterator<Long> iterpB = streetPointsB.iterator(); iterpB.hasNext(); indexB++){
+							Long pB = iterpB.next();
+
+							//System.out.println("running " + indexA + " against index " + indexB);
+
+							if(lastBP == -1 || lastBL == null){
+								lastBP = pB;
+								lastBL = landmarks.get(pB);
+								continue;
+							}
+							currentBP = pB;
+							currentBL = landmarks.get(pB);
+							// street part from lastBP to currentBP
+
+							// check for crossings in the two street parts
+							// [lastAP,currentAP] and [lastBP,currentBP]
+
+							Landmark crossing = checkCrossing(
+									lastAL, currentAL,
+									lastBL, currentBL
+							);
+
+							if(crossing != null){
+
+								// add this id to a set
+								if(!streetPointsA.contains(crossing.id)){
+									streetPointsA.add(indexA, crossing.id);
+									//System.out.println("Adding landmark to street A");
+									changed = true;
+								}
+
+								if(!streetPointsB.contains(crossing.id)){
+									streetPointsB.add(indexB, crossing.id);
+									//System.out.println("Adding landmark to street B");
+									changed = true;
+								}
+
+								if(changed){
+									missingLandmarks++;
+									fixCompletenessAddedLandmarks.add(crossing.id);	
+									break;
+								}
+
+							} //if(crossing != null)
+
+							lastBP = currentBP;
+							lastBL = currentBL;
+
+						} //for(Iterator<Long> iterpB = streetPointsB.iterator(); iterpB.hasNext(); )
+
+						if(changed) break;
+
+					} //for(Long streetB : streets.keySet())
+
+					// move to next part
+					lastAP = currentAP;
+					lastAL = currentAL;
+
+					if(changed) break;
+
+				} //for(Iterator<Long> iterpA = streetPointsA.iterator(); iterpA.hasNext(); )
+
+				if(changed) break;
+
+        //en caso de que no existan cambios, pasamos al siguiente elemento
+        queue_streets.remove();
+        i++;
+
+			} //for(Long streetA : streets.keySet())
+
+      maximo = Math.max(maximo, i);
+      current = i;
+
+		}while(changed);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    maximo = 0;
+    current = 0;
+
+		do{
+			changed = false;
+
+			// walk all streets
+      i = 0;
 			for(Long streetA : streets.keySet()){
+        System.out.println("Street " + i + "/" + total_streets + " (max " + maximo + ", current " + current + ")");
+        i++;
 				Vector<Long> streetPointsA = streets.get(streetA);
 
 				int indexA = 0;
@@ -468,6 +626,9 @@ public class Osm2Wkt {
 				if(changed) break;
 
 			} //for(Long streetA : streets.keySet())
+
+      maximo = Math.max(maximo, i);
+      current = i;
 
 		}while(changed);
 
